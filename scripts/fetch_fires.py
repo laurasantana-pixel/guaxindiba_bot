@@ -3,9 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-from etl.extract.terrabrasilis import (
+
+def _ensure_project_root_on_path() -> None:
+    """Make the repository root importable when running as a script."""
+
+    repo_root = Path(__file__).resolve().parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+
+
+_ensure_project_root_on_path()
+
+from etl.extract.terrabrasilis import (  # noqa: E402  (import after path fix)
     TerraBrasilisConfig,
     TerraBrasilisFilters,
     fetch_fire_data,
