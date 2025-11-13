@@ -4,7 +4,7 @@ from typing import Any, Iterable
 
 from pandas import DataFrame, Series
 
-from shapely.geometry import BaseGeometry
+from compat.shapely import BaseGeometry
 
 
 class GeoSeries(Series):

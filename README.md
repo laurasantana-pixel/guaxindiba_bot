@@ -2,6 +2,76 @@
 
 Ferramentas para coletar e analisar focos de queimadas usando dados do TerraBrasilis.
 
+## Pipeline ETL completo
+
+O módulo `etl.pipeline` integra extração, transformação e carga dos dados em
+um fluxo único. Ele coleta os focos de queimadas no TerraBrasilis, busca a
+geometria da Estação Ecológica Estadual de Guaxindiba no OpenStreetMap,
+marca os pontos que intersectam a reserva e persiste tanto a tabela final
+quanto a geometria em disco.
+
+### Como executar o pipeline
+
+1. **Prepare o ambiente Python** (caso ainda não tenha sido feito):
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # No Windows use `.venv\\Scripts\\activate`
+   pip install --upgrade pip
+   pip install pandas geopandas shapely selenium webdriver-manager
+   ```
+
+   > ℹ️ O repositório inclui uma implementação simplificada de `shapely` apenas
+   > para uso em ambientes sem a dependência compilada. Quando a biblioteca real
+   > está instalada, ela passa a ser utilizada automaticamente (necessária para
+   > recursos avançados como a integração com o OSMnx).
+
+2. **Execute o pipeline via CLI**. Ajuste os caminhos conforme necessário:
+   ```bash
+   python -m etl.pipeline \
+       --fires-output data/focos_processados.csv \
+       --geometry-output data/reserva.geojson \
+       --reserve-cache cache/reserva.geojson
+   ```
+
+   > 💡 No PowerShell, substitua as barras invertidas (`\`) por crases (`` ` ``)
+   > ao quebrar linhas ou execute o comando em uma única linha:
+   > ```powershell
+   > python -m etl.pipeline `
+   >     --fires-output data/focos_processados.csv `
+   >     --geometry-output data/reserva.geojson `
+   >     --reserve-cache cache/reserva.geojson
+   > ```
+   > ou
+   > ```powershell
+   > python -m etl.pipeline --fires-output data/focos_processados.csv --geometry-output data/reserva.geojson --reserve-cache cache/reserva.geojson
+   > ```
+
+3. **Revise as opções disponíveis**:
+   ```bash
+   python -m etl.pipeline --help
+   ```
+
+   Flags úteis:
+
+   - `--headless`: executa o navegador em modo headless durante a coleta do
+     TerraBrasilis.
+   - `--no-mark-inside`: pula a etapa que marca focos dentro da reserva.
+   - `--skip-geometry-output`: evita sobrescrever a geometria após a execução.
+
+### Reutilizando em código Python
+
+O pipeline também pode ser chamado programaticamente:
+
+```python
+from etl.pipeline import PipelineConfig, run_pipeline
+
+config = PipelineConfig(
+    dataframe_output="data/focos_processados.csv",
+    geometry_output="data/reserva.geojson",
+)
+run_pipeline(config)
+```
+
 ## Como testar a extração do TerraBrasilis
 
 1. **Prepare o ambiente Python**

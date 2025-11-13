@@ -10,7 +10,8 @@ import json
 import geopandas as gpd
 import pandas as pd
 import pytest
-from shapely import wkt
+
+from compat import shapely as shapely_compat
 
 from etl.transform.spatial import mark_points_inside
 
@@ -20,7 +21,7 @@ def points_gdf():
     with open("tests/data/points.json", "r", encoding="utf-8") as fh:
         rows = json.load(fh)
     df = pd.DataFrame(rows)
-    geometries = df["wkt"].apply(wkt.loads)
+    geometries = df["wkt"].apply(shapely_compat.wkt.loads)
     return gpd.GeoDataFrame(df.drop(columns=["wkt"]), geometry=geometries, crs="EPSG:4326")
 
 
@@ -29,7 +30,7 @@ def areas_geodf():
     with open("tests/data/protected_areas.json", "r", encoding="utf-8") as fh:
         rows = json.load(fh)
     df = pd.DataFrame(rows)
-    geometries = df["wkt"].apply(wkt.loads)
+    geometries = df["wkt"].apply(shapely_compat.wkt.loads)
     gdf = gpd.GeoDataFrame(df.drop(columns=["wkt"]), geometry=geometries, crs="EPSG:4326")
     return gdf
 

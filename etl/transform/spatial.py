@@ -7,7 +7,8 @@ from typing import Any
 
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry.base import BaseGeometry
+
+from compat.shapely import BaseGeometry
 
 GeometryLike = Any
 

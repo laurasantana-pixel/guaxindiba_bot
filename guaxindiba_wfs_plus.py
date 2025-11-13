@@ -2,8 +2,26 @@
 import osmnx as ox
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import Point
-from shapely.prepared import prep
+
+from compat.shapely import Point, USING_STUB
+
+try:  # pragma: no cover - depends on optional dependency
+    from shapely.prepared import prep  # type: ignore
+except Exception:  # pragma: no cover - used when shapely is not installed
+    class _PreparedGeometry:
+        def __init__(self, geometry):
+            self._geometry = geometry
+
+        def contains(self, other):
+            return self._geometry.contains(other)
+
+        def intersects(self, other):
+            return self._geometry.intersects(other)
+
+    def prep(geometry):
+        if USING_STUB:
+            return _PreparedGeometry(geometry)
+        raise
 from unidecode import unidecode
 
 RESERVE_NAME = "Estação Ecológica Estadual de Guaxindiba"

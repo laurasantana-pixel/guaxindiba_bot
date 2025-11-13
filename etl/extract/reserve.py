@@ -8,9 +8,8 @@ from typing import Iterable
 import json
 
 import osmnx as ox
-from shapely.geometry import shape
-from shapely.geometry.base import BaseGeometry
-from shapely.geometry import mapping
+
+from compat.shapely import BaseGeometry, mapping, shape
 from unidecode import unidecode
 
 RESERVE_NAME = "Estação Ecológica Estadual de Guaxindiba"
