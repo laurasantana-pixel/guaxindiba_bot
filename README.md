@@ -2,6 +2,47 @@
 
 Ferramentas para coletar e analisar focos de queimadas usando dados do TerraBrasilis.
 
+## Pipeline ETL completo
+
+O módulo `etl.pipeline` integra extração, transformação e carga dos dados em
+um fluxo único. Ele coleta os focos de queimadas no TerraBrasilis, busca a
+geometria da Estação Ecológica Estadual de Guaxindiba no OpenStreetMap,
+marca os pontos que intersectam a reserva e persiste tanto a tabela final
+quanto a geometria em disco.
+
+### Executar via CLI
+
+Um utilitário de linha de comando está disponível para facilitar a execução
+do fluxo. Ajuste os caminhos conforme necessário:
+
+```bash
+python -m etl.pipeline \
+    --fires-output data/focos_processados.csv \
+    --geometry-output data/reserva.geojson \
+    --reserve-cache cache/reserva.geojson
+```
+
+Opções úteis:
+
+- `--headless`: executa o navegador em modo headless durante a coleta do
+  TerraBrasilis.
+- `--no-mark-inside`: pula a etapa que marca focos dentro da reserva.
+- `--skip-geometry-output`: evita sobrescrever a geometria após a execução.
+
+### Reutilizando em código Python
+
+O pipeline também pode ser chamado programaticamente:
+
+```python
+from etl.pipeline import PipelineConfig, run_pipeline
+
+config = PipelineConfig(
+    dataframe_output="data/focos_processados.csv",
+    geometry_output="data/reserva.geojson",
+)
+run_pipeline(config)
+```
+
 ## Como testar a extração do TerraBrasilis
 
 1. **Prepare o ambiente Python**
