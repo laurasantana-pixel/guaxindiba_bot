@@ -1,0 +1,6 @@
+[
+  {"id": 1, "wkt": "POINT (0 0)"},
+  {"id": 2, "wkt": "POINT (2 2)"},
+  {"id": 3, "wkt": "POINT (4 4)"},
+  {"id": 4, "wkt": "POINT (1 2)"}
+]
