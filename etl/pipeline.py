@@ -125,8 +125,17 @@ def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
     if lat_col is None or lon_col is None:
         return df
 
-    geometries = [Point(xy) for xy in zip(df[lon_col], df[lat_col])]
-    return df.assign(geometry=geometries)
+    lat_series = pd.to_numeric(df[lat_col], errors="coerce")
+    lon_series = pd.to_numeric(df[lon_col], errors="coerce")
+    valid = lat_series.notna() & lon_series.notna()
+
+    if not valid.any():
+        return df
+
+    geometries = [Point(xy) for xy in zip(lon_series[valid], lat_series[valid])]
+    result = df.copy()
+    result.loc[valid, "geometry"] = geometries
+    return result
 
 
 def build_parser() -> argparse.ArgumentParser:

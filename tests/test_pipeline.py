@@ -108,3 +108,22 @@ def test_run_pipeline_builds_geometry_from_lat_lon(tmp_path):
     assert "geometry" in result.result.columns
     assert all(isinstance(geom, Point) for geom in result.result.geometry)
     assert result.result["inside"].tolist() == [True, True]
+
+
+def test_run_pipeline_ignores_non_numeric_lat_lon(tmp_path):
+    base_df = pd.DataFrame({"Latitude": ["Latitude", 1], "Longitude": ["Longitude", 1]})
+    reserve_geometry = Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])
+
+    cfg = PipelineConfig(
+        dataframe_output=tmp_path / "fires.csv",
+        geometry_output=None,
+        fetch_fire_data=lambda **_: base_df,
+        get_reserve_geometry=lambda **_: reserve_geometry,
+    )
+
+    result = run_pipeline(cfg)
+
+    assert "geometry" in result.result.columns
+    assert pd.isna(result.result.loc[0, "geometry"])
+    assert isinstance(result.result.loc[1, "geometry"], Point)
+    assert result.result["inside"].tolist() == [False, True]
