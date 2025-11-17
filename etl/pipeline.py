@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 import pandas as pd
+from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 
 from .load.csv import save_dataframe as default_save_dataframe
@@ -97,6 +98,7 @@ def run_pipeline(config: PipelineConfig | Mapping[str, Any]) -> PipelineResult:
         raise ValueError("fetch_fire_data and get_reserve_geometry callables must be provided")
 
     fires = cfg.fetch_fire_data(**cfg.fetch_fire_kwargs)
+    fires = _ensure_geometry_column(fires)
     geometry = cfg.get_reserve_geometry(**cfg.reserve_kwargs)
 
     if cfg.apply_transform and cfg.transformer is not None:
@@ -110,6 +112,21 @@ def run_pipeline(config: PipelineConfig | Mapping[str, Any]) -> PipelineResult:
         cfg.geometry_loader(geometry, cfg.geometry_output)
 
     return PipelineResult(fires=fires, geometry=geometry, result=result_df)
+
+
+def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
+    if "geometry" in df.columns:
+        return df
+
+    lower_columns = {name.lower(): name for name in df.columns}
+    lat_col = next((lower_columns[key] for key in ("lat", "latitude") if key in lower_columns), None)
+    lon_col = next((lower_columns[key] for key in ("lon", "longitude", "long") if key in lower_columns), None)
+
+    if lat_col is None or lon_col is None:
+        return df
+
+    geometries = [Point(xy) for xy in zip(df[lon_col], df[lat_col])]
+    return df.assign(geometry=geometries)
 
 
 def build_parser() -> argparse.ArgumentParser:

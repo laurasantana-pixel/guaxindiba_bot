@@ -90,3 +90,21 @@ def test_run_pipeline_can_skip_transformation(tmp_path):
     _assert_frame_equal(result.result, base_df)
     assert len(loader_calls) == 1
     _assert_frame_equal(loader_calls[0], base_df)
+
+
+def test_run_pipeline_builds_geometry_from_lat_lon(tmp_path):
+    base_df = pd.DataFrame({"lat": [0, 1], "lon": [0, 1]})
+    reserve_geometry = Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])
+
+    cfg = PipelineConfig(
+        dataframe_output=tmp_path / "fires.csv",
+        geometry_output=None,
+        fetch_fire_data=lambda **_: base_df,
+        get_reserve_geometry=lambda **_: reserve_geometry,
+    )
+
+    result = run_pipeline(cfg)
+
+    assert "geometry" in result.result.columns
+    assert all(isinstance(geom, Point) for geom in result.result.geometry)
+    assert result.result["inside"].tolist() == [True, True]
