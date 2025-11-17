@@ -8,6 +8,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+import numpy as np
 import pandas as pd
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
@@ -127,14 +128,28 @@ def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
 
     lat_series = pd.to_numeric(df[lat_col], errors="coerce")
     lon_series = pd.to_numeric(df[lon_col], errors="coerce")
-    valid = lat_series.notna() & lon_series.notna()
 
-    if not valid.any():
+    geometries: list[Point] = []
+    valid_index: list[int] = []
+
+    for idx, (lon, lat) in zip(df.index, zip(lon_series, lat_series)):
+        try:
+            lon_f = float(lon)
+            lat_f = float(lat)
+        except (TypeError, ValueError):
+            continue
+
+        if not np.isfinite(lon_f) or not np.isfinite(lat_f):
+            continue
+
+        valid_index.append(idx)
+        geometries.append(Point(lon_f, lat_f))
+
+    if not geometries:
         return df
 
-    geometries = [Point(xy) for xy in zip(lon_series[valid], lat_series[valid])]
     result = df.copy()
-    result.loc[valid, "geometry"] = geometries
+    result.loc[valid_index, "geometry"] = geometries
     return result
 
 
