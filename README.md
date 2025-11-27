@@ -120,13 +120,13 @@ run_pipeline(config)
 O repositório já inclui um workflow funcional em `.github/workflows/pipeline.yml` que roda a cada 10 minutos (cron `*/10 * * * *`) e também pode ser disparado manualmente. Ele:
 
 - Usa `ubuntu-latest` com Python 3.11, cache de dependências (`requirements.txt`).
-- Executa `python -m etl.pipeline` em modo headless e armazena saídas em `data/` e `cache/`.
+- Executa `python -m etl.pipeline` em modo headless e armazena saídas em `data/` e `cache/`. No ambiente CI ele roda com `--offline-sample` para usar os dados de exemplo versionados, garantindo que os artefatos sejam gerados mesmo sem acesso à internet.
 - Publica os artefatos `focos_processados.csv`, `reserva.geojson` e o cache da geometria ao final da execução.
 
 Para customizar:
 
 - Ajuste o cron ou runner editando `.github/workflows/pipeline.yml`.
-- Inclua flags adicionais na etapa **Run pipeline** conforme necessário (`--no-mark-inside`, `--skip-geometry-output`, etc.).
+- Inclua flags adicionais na etapa **Run pipeline** conforme necessário (`--no-mark-inside`, `--skip-geometry-output`, `--offline-sample`, etc.).
 - Caso precise de variáveis sensíveis, defina segredos no repositório e referencie-os como `env:` ou `secrets.*` no workflow.
 
 ## Como testar a extração do TerraBrasilis

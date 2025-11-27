@@ -38,7 +38,8 @@ jobs:
             --fires-output data/focos_processados.csv \
             --geometry-output data/reserva.geojson \
             --reserve-cache cache/reserva.geojson \
-            --headless
+            --headless \
+            --offline-sample
 
       - name: Upload artifacts
         if: always()
