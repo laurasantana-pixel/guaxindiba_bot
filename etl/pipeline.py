@@ -8,9 +8,11 @@ from os import PathLike
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+import json
+
 import numpy as np
 import pandas as pd
-from shapely.geometry import Point
+from shapely.geometry import Point, shape
 from shapely.geometry.base import BaseGeometry
 
 from .load.csv import save_dataframe as default_save_dataframe
@@ -115,6 +117,25 @@ def run_pipeline(config: PipelineConfig | Mapping[str, Any]) -> PipelineResult:
     return PipelineResult(fires=fires, geometry=geometry, result=result_df)
 
 
+def _load_sample_dataframe(path: Path | str | PathLike[str]) -> pd.DataFrame:
+    sample_path = _ensure_path(path)
+    return pd.read_csv(sample_path)
+
+
+def _load_sample_geometry(path: Path | str | PathLike[str]) -> BaseGeometry:
+    sample_path = _ensure_path(path)
+    data = json.loads(sample_path.read_text(encoding="utf-8"))
+    if data.get("type") == "FeatureCollection":
+        features = data.get("features") or []
+        if not features:
+            raise ValueError("A geometria de exemplo não contém features")
+        geometry_data = features[0]["geometry"]
+    else:
+        geometry_data = data
+
+    return shape(geometry_data)
+
+
 def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
     if "geometry" in df.columns:
         return df
@@ -195,6 +216,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Não salva a geometria da reserva após a execução do pipeline.",
     )
+    parser.add_argument(
+        "--offline-sample",
+        action="store_true",
+        help=(
+            "Usa dados de exemplo locais em vez de buscar informações online (útil em CI sem rede)."
+        ),
+    )
     return parser
 
 
@@ -217,24 +245,44 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         geometry_output = args.geometry_output
 
-    from .extract.terrabrasilis import TerraBrasilisConfig, TerraBrasilisFilters
+    if args.offline_sample:
+        repo_root = Path(__file__).resolve().parent.parent
 
-    fetch_kwargs: dict[str, Any] = {
-        "filters": TerraBrasilisFilters(),
-        "config": TerraBrasilisConfig(
-            headless=args.headless,
-            pause_after_apply=not args.headless,
-            close_browser_on_finish=True,
-        ),
-    }
+        def _offline_fetch_fire_data(**_: Any) -> pd.DataFrame:
+            sample_file = repo_root / "focos_ficticios.csv"
+            return _load_sample_dataframe(sample_file)
 
-    cfg = PipelineConfig(
-        dataframe_output=args.fires_output,
-        geometry_output=geometry_output,
-        apply_transform=not args.no_mark_inside,
-        fetch_fire_kwargs=fetch_kwargs,
-        reserve_kwargs=reserve_kwargs,
-    )
+        def _offline_get_geometry(**_: Any) -> BaseGeometry:
+            sample_geometry = repo_root / "EEEG_polygon.geojson"
+            return _load_sample_geometry(sample_geometry)
+
+        cfg = PipelineConfig(
+            dataframe_output=args.fires_output,
+            geometry_output=geometry_output,
+            apply_transform=not args.no_mark_inside,
+            fetch_fire_data=_offline_fetch_fire_data,
+            reserve_kwargs=reserve_kwargs,
+            get_reserve_geometry=_offline_get_geometry,
+        )
+    else:
+        from .extract.terrabrasilis import TerraBrasilisConfig, TerraBrasilisFilters
+
+        fetch_kwargs: dict[str, Any] = {
+            "filters": TerraBrasilisFilters(),
+            "config": TerraBrasilisConfig(
+                headless=args.headless,
+                pause_after_apply=not args.headless,
+                close_browser_on_finish=True,
+            ),
+        }
+
+        cfg = PipelineConfig(
+            dataframe_output=args.fires_output,
+            geometry_output=geometry_output,
+            apply_transform=not args.no_mark_inside,
+            fetch_fire_kwargs=fetch_kwargs,
+            reserve_kwargs=reserve_kwargs,
+        )
 
     run_pipeline(cfg)
     return 0
