@@ -48,6 +48,11 @@ quanto a geometria em disco.
    pip install -r requirements.txt
    ```
 
+   O `requirements.txt` já inclui dependências opcionais como `lxml` (usada
+   pelo pandas/geopandas ao ler dados do TerraBrasilis/BDQueimadas). Se você
+   recebeu erros de `ImportError` para `lxml`, atualize o ambiente com o
+   comando acima para garantir que o pacote foi instalado.
+
 2. **Execute o pipeline via CLI**. Ajuste os caminhos conforme necessário:
    ```bash
    python -m etl.pipeline \
