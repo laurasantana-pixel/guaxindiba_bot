@@ -120,7 +120,7 @@ run_pipeline(config)
 O repositório já inclui um workflow funcional em `.github/workflows/pipeline.yml` que roda a cada 10 minutos (cron `*/10 * * * *`) e também pode ser disparado manualmente. Ele:
 
 - Usa `ubuntu-latest` com Python 3.11, cache de dependências (`requirements.txt`).
-- Executa `python -m etl.pipeline` em modo headless e armazena saídas em `data/` e `cache/`. No ambiente CI ele roda com `--offline-sample` para usar os dados de exemplo versionados, garantindo que os artefatos sejam gerados mesmo sem acesso à internet.
+- Executa `python -m etl.pipeline` em modo headless e armazena saídas em `data/` e `cache/`. O workflow padrão coleta diretamente do TerraBrasilis/BDQueimadas; se o ambiente não tiver acesso à internet, adicione manualmente a flag `--offline-sample` para usar os dados de exemplo versionados.
 - Publica os artefatos `focos_processados.csv`, `reserva.geojson` e o cache da geometria ao final da execução.
 
 Para customizar:
