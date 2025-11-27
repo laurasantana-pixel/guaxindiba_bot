@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from dataclasses import dataclass, field
 from os import PathLike
 from pathlib import Path
@@ -17,6 +18,8 @@ from shapely.geometry.base import BaseGeometry
 
 from .load.csv import save_dataframe as default_save_dataframe
 from .load.csv import save_geometry as default_save_geometry
+
+logger = logging.getLogger(__name__)
 
 FireFetcher = Callable[..., pd.DataFrame]
 GeometryFetcher = Callable[..., BaseGeometry]
@@ -100,20 +103,29 @@ def run_pipeline(config: PipelineConfig | Mapping[str, Any]) -> PipelineResult:
     if cfg.fetch_fire_data is None or cfg.get_reserve_geometry is None:
         raise ValueError("fetch_fire_data and get_reserve_geometry callables must be provided")
 
+    logger.info("Iniciando execução do pipeline")
+
+    logger.info("Buscando focos de queimadas com os parâmetros: %s", cfg.fetch_fire_kwargs)
     fires = cfg.fetch_fire_data(**cfg.fetch_fire_kwargs)
+    logger.info("%s registros de focos obtidos", len(fires))
     fires = _ensure_geometry_column(fires)
     geometry = cfg.get_reserve_geometry(**cfg.reserve_kwargs)
+    logger.info("Geometria da reserva carregada com sucesso")
 
     if cfg.apply_transform and cfg.transformer is not None:
+        logger.info("Aplicando transformações espaciais")
         result_df = cfg.transformer(fires, geometry, **cfg.transformer_kwargs)
     else:
         result_df = fires.copy()
 
+    logger.info("Salvando CSV de focos em %s", cfg.dataframe_output)
     cfg.dataframe_loader(result_df, cfg.dataframe_output)
 
     if cfg.geometry_output is not None:
+        logger.info("Salvando GeoJSON da reserva em %s", cfg.geometry_output)
         cfg.geometry_loader(geometry, cfg.geometry_output)
 
+    logger.info("Pipeline concluído com sucesso")
     return PipelineResult(fires=fires, geometry=geometry, result=result_df)
 
 
@@ -138,6 +150,7 @@ def _load_sample_geometry(path: Path | str | PathLike[str]) -> BaseGeometry:
 
 def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
     if "geometry" in df.columns:
+        logger.info("Coluna geometry já presente com %s linhas", len(df))
         return df
 
     lower_columns = {name.lower(): name for name in df.columns}
@@ -145,6 +158,7 @@ def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
     lon_col = next((lower_columns[key] for key in ("lon", "longitude", "long") if key in lower_columns), None)
 
     if lat_col is None or lon_col is None:
+        logger.warning("Colunas de latitude/longitude não encontradas; não foi possível criar geometria")
         return df
 
     lat_series = pd.to_numeric(df[lat_col], errors="coerce")
@@ -152,6 +166,7 @@ def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
 
     geometries: list[Point] = []
     valid_index: list[int] = []
+    out_of_range = 0
 
     for idx, (lon, lat) in zip(df.index, zip(lon_series, lat_series)):
         try:
@@ -163,14 +178,32 @@ def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
         if not np.isfinite(lon_f) or not np.isfinite(lat_f):
             continue
 
+        if not (-180.0 <= lon_f <= 180.0 and -90.0 <= lat_f <= 90.0):
+            out_of_range += 1
+            continue
+
         valid_index.append(idx)
         geometries.append(Point(lon_f, lat_f))
 
     if not geometries:
+        logger.warning("Nenhuma coordenada válida encontrada para criar a coluna geometry")
         return df
 
     result = df.copy()
     result.loc[valid_index, "geometry"] = geometries
+    logger.info(
+        "Geometria criada para %s linhas (%s descartadas; %s fora de faixa lat/lon)",
+        len(geometries),
+        len(df) - len(geometries),
+        out_of_range,
+    )
+    logger.debug(
+        "Faixa de coordenadas válidas: lon=[%.5f, %.5f], lat=[%.5f, %.5f]",
+        min(point.x for point in geometries),
+        max(point.x for point in geometries),
+        min(point.y for point in geometries),
+        max(point.y for point in geometries),
+    )
     return result
 
 
@@ -234,6 +267,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging()
 
     args = build_parser().parse_args(argv)
+    logger.info("Parâmetros recebidos: %s", args)
 
     reserve_kwargs: dict[str, Any] = {"name": args.reserve_name}
     if args.reserve_cache is not None:
@@ -247,6 +281,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.offline_sample:
         repo_root = Path(__file__).resolve().parent.parent
+
+        logger.info("Executando pipeline em modo offline usando dados de amostra")
 
         def _offline_fetch_fire_data(**_: Any) -> pd.DataFrame:
             sample_file = repo_root / "focos_ficticios.csv"
@@ -275,6 +311,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 close_browser_on_finish=True,
             ),
         }
+
+        logger.info("Executando pipeline com coleta online do TerraBrasilis (headless=%s)", args.headless)
 
         cfg = PipelineConfig(
             dataframe_output=args.fires_output,
