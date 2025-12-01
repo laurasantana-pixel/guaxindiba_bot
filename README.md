@@ -83,6 +83,10 @@ quanto a geometria em disco.
 
    - `--headless`: executa o navegador em modo headless durante a coleta do
      TerraBrasilis.
+   - `--city-name "NOME DA CIDADE"`: filtra os focos retornados pelo
+     TerraBrasilis/BDQueimadas para o município informado (comparação textual
+     por colunas de município/município/cidade). Caso nenhuma coluna compatível
+     exista, o pipeline avisa no log e segue sem filtrar.
    - `--no-mark-inside`: pula a etapa que marca focos dentro da reserva.
    - `--skip-geometry-output`: evita sobrescrever a geometria após a execução.
 

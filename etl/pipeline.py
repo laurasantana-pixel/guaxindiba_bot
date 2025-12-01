@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from shapely.geometry import Point, shape
 from shapely.geometry.base import BaseGeometry
+from unidecode import unidecode
 
 from .load.csv import save_dataframe as default_save_dataframe
 from .load.csv import save_geometry as default_save_geometry
@@ -51,6 +52,7 @@ class PipelineConfig:
     transformer_kwargs: dict[str, Any] = field(default_factory=dict)
     dataframe_loader: DataFrameLoader = default_save_dataframe
     geometry_loader: GeometryLoader = default_save_geometry
+    city_filter: str | None = None
 
     def __post_init__(self) -> None:
         self.dataframe_output = _ensure_path(self.dataframe_output)
@@ -108,6 +110,7 @@ def run_pipeline(config: PipelineConfig | Mapping[str, Any]) -> PipelineResult:
     logger.info("Buscando focos de queimadas com os parâmetros: %s", cfg.fetch_fire_kwargs)
     fires = cfg.fetch_fire_data(**cfg.fetch_fire_kwargs)
     logger.info("%s registros de focos obtidos", len(fires))
+    fires = _filter_by_city(fires, cfg.city_filter)
     fires = _ensure_geometry_column(fires)
     geometry = cfg.get_reserve_geometry(**cfg.reserve_kwargs)
     logger.info("Geometria da reserva carregada com sucesso")
@@ -207,6 +210,49 @@ def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def _filter_by_city(df: pd.DataFrame, city_name: str | None) -> pd.DataFrame:
+    """Return a DataFrame filtered by municipality when a city is provided."""
+
+    if not city_name:
+        return df
+
+    normalized_target = unidecode(city_name).lower().strip()
+    candidate_columns = [
+        column
+        for column in df.columns
+        if any(keyword in column.lower() for keyword in ("municipio", "município", "municip", "cidade", "city"))
+    ]
+
+    if not candidate_columns:
+        logger.warning(
+            "Nenhuma coluna de município foi encontrada; o filtro por cidade '%s' não será aplicado.",
+            city_name,
+        )
+        return df
+
+    mask_any = False
+    for column in candidate_columns:
+        column_mask = df[column].astype(str).apply(
+            lambda value: normalized_target in unidecode(value).lower()
+        )
+        mask_any = column_mask if isinstance(mask_any, bool) else (mask_any | column_mask)
+
+    filtered = df[mask_any]
+
+    logger.info(
+        "Filtro por cidade aplicado (colunas=%s): %s → %s linhas",
+        candidate_columns,
+        len(df),
+        len(filtered),
+    )
+    if filtered.empty:
+        logger.warning(
+            "O filtro por cidade '%s' resultou em nenhum registro; retornando DataFrame vazio.",
+            city_name,
+        )
+    return filtered
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Return the CLI argument parser used by :func:`main`."""
 
@@ -233,6 +279,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--reserve-name",
         default="Estação Ecológica Estadual de Guaxindiba",
         help="Nome da unidade de conservação a ser buscada.",
+    )
+    parser.add_argument(
+        "--city-name",
+        default=None,
+        help=(
+            "Nome do município a ser filtrado nos dados do BDQueimadas (ex.: 'Campos dos Goytacazes'). "
+            "O filtro é aplicado por comparação textual nas colunas de município do CSV extraído."
+        ),
     )
     parser.add_argument(
         "--headless",
@@ -269,6 +323,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logger.info("Parâmetros recebidos: %s", args)
 
+    if args.city_name:
+        logger.info("Filtro por município solicitado: %s", args.city_name)
+
     reserve_kwargs: dict[str, Any] = {"name": args.reserve_name}
     if args.reserve_cache is not None:
         reserve_kwargs["cache"] = args.reserve_cache
@@ -299,6 +356,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             fetch_fire_data=_offline_fetch_fire_data,
             reserve_kwargs=reserve_kwargs,
             get_reserve_geometry=_offline_get_geometry,
+            city_filter=args.city_name,
         )
     else:
         from .extract.terrabrasilis import TerraBrasilisConfig, TerraBrasilisFilters
@@ -320,6 +378,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             apply_transform=not args.no_mark_inside,
             fetch_fire_kwargs=fetch_kwargs,
             reserve_kwargs=reserve_kwargs,
+            city_filter=args.city_name,
         )
 
     run_pipeline(cfg)
