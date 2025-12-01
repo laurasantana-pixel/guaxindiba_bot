@@ -11,7 +11,7 @@ python -m etl.pipeline
         │       └─ Abre o TerraBrasilis com Selenium e coleta a tabela de focos
         │
         ├── etl.extract.reserve.get_reserve_geometry
-        │       └─ Busca a geometria da EEE Guaxindiba no OpenStreetMap (usa cache opcional)
+        │       └─ Busca a geometria da reserva alvo no OpenStreetMap ou em um arquivo GeoJSON (cache opcional)
         │
         ├── etl.transform.spatial.mark_points_inside
         │       └─ Converte para GeoDataFrame e marca pontos que intersectam a reserva
@@ -34,9 +34,9 @@ python -m etl.pipeline
 
 O módulo `etl.pipeline` integra extração, transformação e carga dos dados em
 um fluxo único. Ele coleta os focos de queimadas no TerraBrasilis, busca a
-geometria da Estação Ecológica Estadual de Guaxindiba no OpenStreetMap,
-marca os pontos que intersectam a reserva e persiste tanto a tabela final
-quanto a geometria em disco.
+geometria da reserva alvo (por padrão a Estação Ecológica Estadual de
+Guaxindiba, mas você pode informar qualquer outra) e marca os pontos que
+intersectam essa geometria antes de salvar os resultados.
 
 ### Como executar o pipeline
 
@@ -74,6 +74,45 @@ quanto a geometria em disco.
    > python -m etl.pipeline --fires-output data/focos_processados.csv --geometry-output data/reserva.geojson --reserve-cache cache/reserva.geojson
    > ```
 
+   **Exemplo com filtro de cidade (Campos dos Goytacazes)**
+
+   - Bash / WSL:
+     ```bash
+     python -m etl.pipeline \
+         --fires-output data/focos_processados.csv \
+         --geometry-output data/reserva.geojson \
+         --reserve-cache cache/reserva.geojson \
+         --city-name "Campos dos Goytacazes"
+     ```
+
+   - PowerShell (use crase `\`` para quebrar linhas):
+     ```powershell
+     python -m etl.pipeline `
+         --fires-output data/focos_processados.csv `
+         --geometry-output data/reserva.geojson `
+         --reserve-cache cache/reserva.geojson `
+         --city-name "Campos dos Goytacazes"
+     ```
+     ou em linha única:
+     ```powershell
+     python -m etl.pipeline --fires-output data/focos_processados.csv --geometry-output data/reserva.geojson --reserve-cache cache/reserva.geojson --city-name "Campos dos Goytacazes"
+     ```
+
+   **Exemplo usando outra unidade de conservação**
+
+   - Bash / WSL:
+     ```bash
+     python -m etl.pipeline \
+         --fires-output data/focos_processados.csv \
+         --geometry-output data/reserva.geojson \
+         --reserve-cache cache/reserva.geojson \
+         --reserve-name "Parque Estadual da Serra do Mar" \
+         --reserve-search-place "São Paulo, Brazil"
+     ```
+     Se você já tiver um GeoJSON confiável dessa reserva, substitua as duas últimas
+     flags por `--reserve-geometry-file caminho/para/reserva.geojson` para pular a
+     busca no OpenStreetMap.
+
 3. **Revise as opções disponíveis**:
    ```bash
    python -m etl.pipeline --help
@@ -81,14 +120,24 @@ quanto a geometria em disco.
 
    Flags úteis:
 
-   - `--headless`: executa o navegador em modo headless durante a coleta do
-     TerraBrasilis.
-   - `--city-name "NOME DA CIDADE"`: filtra os focos retornados pelo
-     TerraBrasilis/BDQueimadas para o município informado (comparação textual
-     por colunas de município/município/cidade). Caso nenhuma coluna compatível
-     exista, o pipeline avisa no log e segue sem filtrar.
-   - `--no-mark-inside`: pula a etapa que marca focos dentro da reserva.
-   - `--skip-geometry-output`: evita sobrescrever a geometria após a execução.
+  - `--reserve-name "NOME DA UC"`: altera a unidade de conservação alvo sem
+    precisar modificar o código (ex.: "Parque Estadual da Serra do Mar").
+  - `--reserve-search-place "Estado, País"`: restringe a área de busca no
+    OpenStreetMap; pode ser passada múltiplas vezes para testar diferentes
+    recortes.
+  - `--reserve-geometry-file caminho.geojson`: usa um GeoJSON já conhecido
+    como geometria da reserva, pulando a busca no OSM e reutilizando-o como
+    cache se desejar.
+  - `--headless`: executa o navegador em modo headless durante a coleta do
+    TerraBrasilis.
+  - `--city-name "NOME DA CIDADE"`: filtra os focos retornados pelo
+    TerraBrasilis/BDQueimadas para o município informado (comparação textual
+    por colunas de município/município/cidade). O filtro é aplicado em memória
+    logo após o download do CSV, antes das transformações espaciais. Caso
+    nenhuma coluna compatível exista, o pipeline avisa no log e segue sem
+    filtrar.
+  - `--no-mark-inside`: pula a etapa que marca focos dentro da reserva.
+  - `--skip-geometry-output`: evita sobrescrever a geometria após a execução.
 
 ### Reutilizando em código Python
 

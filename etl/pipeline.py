@@ -110,6 +110,8 @@ def run_pipeline(config: PipelineConfig | Mapping[str, Any]) -> PipelineResult:
     logger.info("Buscando focos de queimadas com os parâmetros: %s", cfg.fetch_fire_kwargs)
     fires = cfg.fetch_fire_data(**cfg.fetch_fire_kwargs)
     logger.info("%s registros de focos obtidos", len(fires))
+    if cfg.city_filter:
+        logger.info("Aplicando filtro de município em memória: %s", cfg.city_filter)
     fires = _filter_by_city(fires, cfg.city_filter)
     fires = _ensure_geometry_column(fires)
     geometry = cfg.get_reserve_geometry(**cfg.reserve_kwargs)
@@ -278,7 +280,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reserve-name",
         default="Estação Ecológica Estadual de Guaxindiba",
-        help="Nome da unidade de conservação a ser buscada.",
+        help="Nome da unidade de conservação a ser buscada no OpenStreetMap.",
+    )
+    parser.add_argument(
+        "--reserve-geometry-file",
+        type=Path,
+        default=None,
+        help=(
+            "GeoJSON com a geometria da reserva para pular a busca no OpenStreetMap. "
+            "O arquivo também pode ser usado para popular o cache se desejar."
+        ),
+    )
+    parser.add_argument(
+        "--reserve-search-place",
+        action="append",
+        default=None,
+        help=(
+            "Lugar/área que delimita a busca no OSM (ex.: 'Minas Gerais, Brazil'). "
+            "Pode ser passada múltiplas vezes; se omitido, usa a busca ampla padrão."
+        ),
+    )
+    parser.add_argument(
+        "--city-name",
+        default=None,
+        help=(
+            "Nome do município a ser filtrado nos dados do BDQueimadas (ex.: 'Campos dos Goytacazes'). "
+            "O filtro é aplicado por comparação textual nas colunas de município do CSV extraído."
+        ),
     )
     parser.add_argument(
         "--city-name",
@@ -327,8 +355,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         logger.info("Filtro por município solicitado: %s", args.city_name)
 
     reserve_kwargs: dict[str, Any] = {"name": args.reserve_name}
+    if args.reserve_geometry_file is not None:
+        reserve_kwargs["geometry_file"] = args.reserve_geometry_file
     if args.reserve_cache is not None:
         reserve_kwargs["cache"] = args.reserve_cache
+    if args.reserve_search_place:
+        reserve_kwargs["search_places"] = args.reserve_search_place
 
     geometry_output: Path | None
     if args.skip_geometry_output:
@@ -346,7 +378,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _load_sample_dataframe(sample_file)
 
         def _offline_get_geometry(**_: Any) -> BaseGeometry:
-            sample_geometry = repo_root / "EEEG_polygon.geojson"
+            sample_geometry = args.reserve_geometry_file or (repo_root / "EEEG_polygon.geojson")
             return _load_sample_geometry(sample_geometry)
 
         cfg = PipelineConfig(
