@@ -258,7 +258,9 @@ def _filter_by_city(df: pd.DataFrame, city_name: str | None) -> pd.DataFrame:
 def build_parser() -> argparse.ArgumentParser:
     """Return the CLI argument parser used by :func:`main`."""
 
-    parser = argparse.ArgumentParser(description="Executa o pipeline ETL completo.")
+    parser = argparse.ArgumentParser(
+        description="Executa o pipeline ETL completo.", conflict_handler="resolve"
+    )
     parser.add_argument(
         "--fires-output",
         type=Path,
@@ -298,14 +300,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Lugar/área que delimita a busca no OSM (ex.: 'Minas Gerais, Brazil'). "
             "Pode ser passada múltiplas vezes; se omitido, usa a busca ampla padrão."
-        ),
-    )
-    parser.add_argument(
-        "--city-name",
-        default=None,
-        help=(
-            "Nome do município a ser filtrado nos dados do BDQueimadas (ex.: 'Campos dos Goytacazes'). "
-            "O filtro é aplicado por comparação textual nas colunas de município do CSV extraído."
         ),
     )
     parser.add_argument(
