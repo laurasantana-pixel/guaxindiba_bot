@@ -309,6 +309,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--city-name",
+        default=None,
+        help=(
+            "Nome do município a ser filtrado nos dados do BDQueimadas (ex.: 'Campos dos Goytacazes'). "
+            "O filtro é aplicado por comparação textual nas colunas de município do CSV extraído."
+        ),
+    )
+    parser.add_argument(
         "--headless",
         action="store_true",
         help="Executa a coleta do TerraBrasilis em modo headless.",
