@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from dataclasses import dataclass, field
 from os import PathLike
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+import json
+
 import numpy as np
 import pandas as pd
-from shapely.geometry import Point
+from shapely.geometry import Point, shape
 from shapely.geometry.base import BaseGeometry
+from unidecode import unidecode
 
 from .load.csv import save_dataframe as default_save_dataframe
 from .load.csv import save_geometry as default_save_geometry
+
+logger = logging.getLogger(__name__)
 
 FireFetcher = Callable[..., pd.DataFrame]
 GeometryFetcher = Callable[..., BaseGeometry]
@@ -46,6 +52,7 @@ class PipelineConfig:
     transformer_kwargs: dict[str, Any] = field(default_factory=dict)
     dataframe_loader: DataFrameLoader = default_save_dataframe
     geometry_loader: GeometryLoader = default_save_geometry
+    city_filter: str | None = None
 
     def __post_init__(self) -> None:
         self.dataframe_output = _ensure_path(self.dataframe_output)
@@ -98,25 +105,57 @@ def run_pipeline(config: PipelineConfig | Mapping[str, Any]) -> PipelineResult:
     if cfg.fetch_fire_data is None or cfg.get_reserve_geometry is None:
         raise ValueError("fetch_fire_data and get_reserve_geometry callables must be provided")
 
+    logger.info("Iniciando execução do pipeline")
+
+    logger.info("Buscando focos de queimadas com os parâmetros: %s", cfg.fetch_fire_kwargs)
     fires = cfg.fetch_fire_data(**cfg.fetch_fire_kwargs)
+    logger.info("%s registros de focos obtidos", len(fires))
+    if cfg.city_filter:
+        logger.info("Aplicando filtro de município em memória: %s", cfg.city_filter)
+    fires = _filter_by_city(fires, cfg.city_filter)
     fires = _ensure_geometry_column(fires)
     geometry = cfg.get_reserve_geometry(**cfg.reserve_kwargs)
+    logger.info("Geometria da reserva carregada com sucesso")
 
     if cfg.apply_transform and cfg.transformer is not None:
+        logger.info("Aplicando transformações espaciais")
         result_df = cfg.transformer(fires, geometry, **cfg.transformer_kwargs)
     else:
         result_df = fires.copy()
 
+    logger.info("Salvando CSV de focos em %s", cfg.dataframe_output)
     cfg.dataframe_loader(result_df, cfg.dataframe_output)
 
     if cfg.geometry_output is not None:
+        logger.info("Salvando GeoJSON da reserva em %s", cfg.geometry_output)
         cfg.geometry_loader(geometry, cfg.geometry_output)
 
+    logger.info("Pipeline concluído com sucesso")
     return PipelineResult(fires=fires, geometry=geometry, result=result_df)
+
+
+def _load_sample_dataframe(path: Path | str | PathLike[str]) -> pd.DataFrame:
+    sample_path = _ensure_path(path)
+    return pd.read_csv(sample_path)
+
+
+def _load_sample_geometry(path: Path | str | PathLike[str]) -> BaseGeometry:
+    sample_path = _ensure_path(path)
+    data = json.loads(sample_path.read_text(encoding="utf-8"))
+    if data.get("type") == "FeatureCollection":
+        features = data.get("features") or []
+        if not features:
+            raise ValueError("A geometria de exemplo não contém features")
+        geometry_data = features[0]["geometry"]
+    else:
+        geometry_data = data
+
+    return shape(geometry_data)
 
 
 def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
     if "geometry" in df.columns:
+        logger.info("Coluna geometry já presente com %s linhas", len(df))
         return df
 
     lower_columns = {name.lower(): name for name in df.columns}
@@ -124,6 +163,7 @@ def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
     lon_col = next((lower_columns[key] for key in ("lon", "longitude", "long") if key in lower_columns), None)
 
     if lat_col is None or lon_col is None:
+        logger.warning("Colunas de latitude/longitude não encontradas; não foi possível criar geometria")
         return df
 
     lat_series = pd.to_numeric(df[lat_col], errors="coerce")
@@ -131,6 +171,7 @@ def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
 
     geometries: list[Point] = []
     valid_index: list[int] = []
+    out_of_range = 0
 
     for idx, (lon, lat) in zip(df.index, zip(lon_series, lat_series)):
         try:
@@ -142,15 +183,76 @@ def _ensure_geometry_column(df: pd.DataFrame) -> pd.DataFrame:
         if not np.isfinite(lon_f) or not np.isfinite(lat_f):
             continue
 
+        if not (-180.0 <= lon_f <= 180.0 and -90.0 <= lat_f <= 90.0):
+            out_of_range += 1
+            continue
+
         valid_index.append(idx)
         geometries.append(Point(lon_f, lat_f))
 
     if not geometries:
+        logger.warning("Nenhuma coordenada válida encontrada para criar a coluna geometry")
         return df
 
     result = df.copy()
     result.loc[valid_index, "geometry"] = geometries
+    logger.info(
+        "Geometria criada para %s linhas (%s descartadas; %s fora de faixa lat/lon)",
+        len(geometries),
+        len(df) - len(geometries),
+        out_of_range,
+    )
+    logger.debug(
+        "Faixa de coordenadas válidas: lon=[%.5f, %.5f], lat=[%.5f, %.5f]",
+        min(point.x for point in geometries),
+        max(point.x for point in geometries),
+        min(point.y for point in geometries),
+        max(point.y for point in geometries),
+    )
     return result
+
+
+def _filter_by_city(df: pd.DataFrame, city_name: str | None) -> pd.DataFrame:
+    """Return a DataFrame filtered by municipality when a city is provided."""
+
+    if not city_name:
+        return df
+
+    normalized_target = unidecode(city_name).lower().strip()
+    candidate_columns = [
+        column
+        for column in df.columns
+        if any(keyword in column.lower() for keyword in ("municipio", "município", "municip", "cidade", "city"))
+    ]
+
+    if not candidate_columns:
+        logger.warning(
+            "Nenhuma coluna de município foi encontrada; o filtro por cidade '%s' não será aplicado.",
+            city_name,
+        )
+        return df
+
+    mask_any = False
+    for column in candidate_columns:
+        column_mask = df[column].astype(str).apply(
+            lambda value: normalized_target in unidecode(value).lower()
+        )
+        mask_any = column_mask if isinstance(mask_any, bool) else (mask_any | column_mask)
+
+    filtered = df[mask_any]
+
+    logger.info(
+        "Filtro por cidade aplicado (colunas=%s): %s → %s linhas",
+        candidate_columns,
+        len(df),
+        len(filtered),
+    )
+    if filtered.empty:
+        logger.warning(
+            "O filtro por cidade '%s' resultou em nenhum registro; retornando DataFrame vazio.",
+            city_name,
+        )
+    return filtered
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -178,7 +280,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reserve-name",
         default="Estação Ecológica Estadual de Guaxindiba",
-        help="Nome da unidade de conservação a ser buscada.",
+        help="Nome da unidade de conservação a ser buscada no OpenStreetMap.",
+    )
+    parser.add_argument(
+        "--reserve-geometry-file",
+        type=Path,
+        default=None,
+        help=(
+            "GeoJSON com a geometria da reserva para pular a busca no OpenStreetMap. "
+            "O arquivo também pode ser usado para popular o cache se desejar."
+        ),
+    )
+    parser.add_argument(
+        "--reserve-search-place",
+        action="append",
+        default=None,
+        help=(
+            "Lugar/área que delimita a busca no OSM (ex.: 'Minas Gerais, Brazil'). "
+            "Pode ser passada múltiplas vezes; se omitido, usa a busca ampla padrão."
+        ),
+    )
+    parser.add_argument(
+        "--city-name",
+        default=None,
+        help=(
+            "Nome do município a ser filtrado nos dados do BDQueimadas (ex.: 'Campos dos Goytacazes'). "
+            "O filtro é aplicado por comparação textual nas colunas de município do CSV extraído."
+        ),
     )
     parser.add_argument(
         "--headless",
@@ -195,6 +323,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Não salva a geometria da reserva após a execução do pipeline.",
     )
+    parser.add_argument(
+        "--offline-sample",
+        action="store_true",
+        help=(
+            "Usa dados de exemplo locais em vez de buscar informações online (útil em CI sem rede)."
+        ),
+    )
     return parser
 
 
@@ -206,10 +341,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging()
 
     args = build_parser().parse_args(argv)
+    logger.info("Parâmetros recebidos: %s", args)
+
+    if args.city_name:
+        logger.info("Filtro por município solicitado: %s", args.city_name)
 
     reserve_kwargs: dict[str, Any] = {"name": args.reserve_name}
+    if args.reserve_geometry_file is not None:
+        reserve_kwargs["geometry_file"] = args.reserve_geometry_file
     if args.reserve_cache is not None:
         reserve_kwargs["cache"] = args.reserve_cache
+    if args.reserve_search_place:
+        reserve_kwargs["search_places"] = args.reserve_search_place
 
     geometry_output: Path | None
     if args.skip_geometry_output:
@@ -217,24 +360,50 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         geometry_output = args.geometry_output
 
-    from .extract.terrabrasilis import TerraBrasilisConfig, TerraBrasilisFilters
+    if args.offline_sample:
+        repo_root = Path(__file__).resolve().parent.parent
 
-    fetch_kwargs: dict[str, Any] = {
-        "filters": TerraBrasilisFilters(),
-        "config": TerraBrasilisConfig(
-            headless=args.headless,
-            pause_after_apply=not args.headless,
-            close_browser_on_finish=True,
-        ),
-    }
+        logger.info("Executando pipeline em modo offline usando dados de amostra")
 
-    cfg = PipelineConfig(
-        dataframe_output=args.fires_output,
-        geometry_output=geometry_output,
-        apply_transform=not args.no_mark_inside,
-        fetch_fire_kwargs=fetch_kwargs,
-        reserve_kwargs=reserve_kwargs,
-    )
+        def _offline_fetch_fire_data(**_: Any) -> pd.DataFrame:
+            sample_file = repo_root / "focos_ficticios.csv"
+            return _load_sample_dataframe(sample_file)
+
+        def _offline_get_geometry(**_: Any) -> BaseGeometry:
+            sample_geometry = args.reserve_geometry_file or (repo_root / "EEEG_polygon.geojson")
+            return _load_sample_geometry(sample_geometry)
+
+        cfg = PipelineConfig(
+            dataframe_output=args.fires_output,
+            geometry_output=geometry_output,
+            apply_transform=not args.no_mark_inside,
+            fetch_fire_data=_offline_fetch_fire_data,
+            reserve_kwargs=reserve_kwargs,
+            get_reserve_geometry=_offline_get_geometry,
+            city_filter=args.city_name,
+        )
+    else:
+        from .extract.terrabrasilis import TerraBrasilisConfig, TerraBrasilisFilters
+
+        fetch_kwargs: dict[str, Any] = {
+            "filters": TerraBrasilisFilters(),
+            "config": TerraBrasilisConfig(
+                headless=args.headless,
+                pause_after_apply=not args.headless,
+                close_browser_on_finish=True,
+            ),
+        }
+
+        logger.info("Executando pipeline com coleta online do TerraBrasilis (headless=%s)", args.headless)
+
+        cfg = PipelineConfig(
+            dataframe_output=args.fires_output,
+            geometry_output=geometry_output,
+            apply_transform=not args.no_mark_inside,
+            fetch_fire_kwargs=fetch_kwargs,
+            reserve_kwargs=reserve_kwargs,
+            city_filter=args.city_name,
+        )
 
     run_pipeline(cfg)
     return 0
