@@ -1,0 +1,9 @@
+pandas
+numpy
+shapely
+geopandas
+selenium
+webdriver-manager
+osmnx
+Unidecode
+lxml
