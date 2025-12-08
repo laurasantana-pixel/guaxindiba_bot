@@ -38,6 +38,8 @@ jobs:
             --fires-output data/focos_processados.csv \
             --geometry-output data/reserva.geojson \
             --reserve-cache cache/reserva.geojson \
+            --reserve-name "Valença, Rio de Janeiro, Brazil" \
+            --reserve-search-place "Rio de Janeiro, Brazil" \
             --headless
 
       - name: Upload artifacts
