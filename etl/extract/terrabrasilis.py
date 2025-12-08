@@ -166,10 +166,8 @@ def fetch_fire_data(filters: TerraBrasilisFilters, *, config: TerraBrasilisConfi
         logger.debug("Tabela filtrada disponível")
 
         if cfg.pause_after_apply and not cfg.headless:
-            input(
-                "\n🔎  Tabela filtrada pronta no navegador.\n"
-                "   Pressione <Enter> para exportar CSV..."
-            )
+            logger.info("Tabela filtrada pronta; aguardando um instante antes de exportar automaticamente")
+            _sleep(cfg.step_delay)
 
         table_html = driver.find_element(By.ID, "attributes-table").get_attribute("outerHTML")
         dataframe = pd.read_html(table_html)[0]

@@ -1,0 +1,29 @@
+# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.cache/
+.pytest_cache/
+.mypy_cache/
+build/
+dist/
+*.egg-info/
+*.log
+
+# Virtual environments and env files
+.venv/
+venv/
+.env
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Selenium / webdriver-manager cache
+.wdm/
+
+# Project outputs
+data/
+cache/

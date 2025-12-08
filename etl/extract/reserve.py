@@ -31,6 +31,9 @@ def _iter_places_and_tags(search_places: Sequence[str]) -> Iterable[tuple[str, d
         {"boundary": "protected_area"},
         {"leisure": "nature_reserve"},
         {"boundary": "national_park"},
+        # Fallbacks for administrative/municipality polygons (e.g., cities)
+        {"boundary": "administrative", "admin_level": "8"},
+        {"place": "city"},
     ]
 
     for place in search_places:
@@ -85,6 +88,24 @@ def fetch_reserve_polygon(
             continue
 
         return geometry
+
+    # Fallback: geocode the name directly (optionally scoped by search_places)
+    geocode_queries = [reserve_name]
+    if search_places:
+        geocode_queries.extend(f"{reserve_name}, {place}" for place in search_places)
+
+    for query in geocode_queries:
+        try:
+            gdf = ox.geocode_to_gdf(query)
+        except Exception:  # pragma: no cover - network or API errors are ignored
+            continue
+
+        if gdf is None or gdf.empty or gdf.geometry.is_empty.all():
+            continue
+
+        geometry = gdf.to_crs(4326).unary_union
+        if not geometry.is_empty:
+            return geometry
 
     raise ValueError("Could not find the reserve polygon on OSM.")
 
