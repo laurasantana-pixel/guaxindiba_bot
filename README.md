@@ -96,6 +96,19 @@ python -m etl.pipeline \
   --city-name "Campos dos Goytacazes"
 ```
 
+### Disparar notificação por foco dentro da área (Apps Script)
+- Use `--notify-url` para chamar um endpoint a cada foco marcado como `inside`. Enviamos `regionId` (usa o valor de `--reserve-name`), `timestamp` (primeira coluna de data encontrada), `lat` e `lng` da geometria:
+```bash
+python -m etl.pipeline \
+  --fires-output data/focos_processados.csv \
+  --geometry-output data/reserva.geojson \
+  --reserve-cache cache/reserva.geojson \
+  --reserve-name "Valença, Rio de Janeiro, Brazil" \
+  --reserve-search-place "Rio de Janeiro, Brazil" \
+  --notify-url "https://script.googleusercontent.com/a/macros/gsuite.iff.edu.br/echo?user_content_key=AehSKLis32MgyMI_otNGz_rZ5cFCEcmb9NEdIMexL6O0Aqg0upfjfC6CyUeIXmsm79ZWGtp-b6MisrnOshw6XvUxE_aXXwHW8AUn2GVbg59YLFKK4eCfNKgIhBlqWqLbuU-GvwRRjullAQcg4capQayOI-yFh35D0XFgff8p0PKmihTpMujkDWge-TqR_tQVz0TYFw9xe9CrssxCv4szpLqxI7E5tFgGjacngvrVcT1GEPUVucYhNBlkUzisjECXYKqyf6bqCQCLFYXzrc0oTQj1g5P3CkR-xcq-7YzZzFTECzJmUr6Ik9E_O1iJb-inWmxg0SaGgOLq6uCqhsVqtmP_cKD2keQFNuHmpeG0gEL1NxCmJN5xXwcJld8HVbx_BCsgEDlJfyHe2YXyUrDnFABfvKznflsRYA&lib=M79qET5Zu6sMGiQO3uoSfP_EqweE_tvXn"
+```
+- Se a coluna de interseção tiver outro nome, use `--notify-column NOME_DA_COLUNA`.
+
 ### Modo offline (dados de exemplo)
 Usa `focos_ficticios.csv` e o GeoJSON local (ou `EEEG_polygon.geojson` se nada for informado):
 ```bash

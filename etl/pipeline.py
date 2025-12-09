@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 import json
+import urllib.parse
+import urllib.request
 
 import numpy as np
 import pandas as pd
@@ -27,6 +29,7 @@ GeometryFetcher = Callable[..., BaseGeometry]
 Transformer = Callable[..., pd.DataFrame]
 DataFrameLoader = Callable[[pd.DataFrame, Path | str | PathLike[str]], Any]
 GeometryLoader = Callable[[BaseGeometry, Path | str | PathLike[str]], Any]
+Notifier = Callable[[pd.DataFrame, str, str, str | None], None]
 
 
 def _ensure_path(path: Path | str | PathLike[str]) -> Path:
@@ -53,6 +56,10 @@ class PipelineConfig:
     dataframe_loader: DataFrameLoader = default_save_dataframe
     geometry_loader: GeometryLoader = default_save_geometry
     city_filter: str | None = None
+    notify_url: str | None = None
+    notify_column: str = "inside"
+    notifier: Notifier | None = None
+    region_id: str | None = None
 
     def __post_init__(self) -> None:
         self.dataframe_output = _ensure_path(self.dataframe_output)
@@ -78,6 +85,12 @@ class PipelineConfig:
             from .transform.spatial import mark_points_inside
 
             self.transformer = mark_points_inside
+
+        if self.notifier is None:
+            self.notifier = _notify_intersections
+        if self.region_id is None:
+            reserve_name = self.reserve_kwargs.get("name")
+            self.region_id = str(reserve_name) if reserve_name is not None else None
 
 
 @dataclass(slots=True)
@@ -122,6 +135,9 @@ def run_pipeline(config: PipelineConfig | Mapping[str, Any]) -> PipelineResult:
         result_df = cfg.transformer(fires, geometry, **cfg.transformer_kwargs)
     else:
         result_df = fires.copy()
+
+    if cfg.notify_url and cfg.notifier is not None:
+        cfg.notifier(result_df, cfg.notify_url, cfg.notify_column, cfg.region_id)
 
     logger.info("Salvando CSV de focos em %s", cfg.dataframe_output)
     cfg.dataframe_loader(result_df, cfg.dataframe_output)
@@ -255,6 +271,97 @@ def _filter_by_city(df: pd.DataFrame, city_name: str | None) -> pd.DataFrame:
     return filtered
 
 
+def _pick_timestamp_column(df: pd.DataFrame) -> str | None:
+    """Return the timestamp column name based on TerraBrasilis headers."""
+
+    preferred = "Data / Hora"
+    if preferred in df.columns:
+        return preferred
+
+    # Fallback to case-insensitive match for similar names, if ever present
+    lower_map = {col.lower(): col for col in df.columns}
+    for key in ("data / hora", "data_hora", "data_hora_gmt"):
+        if key in lower_map:
+            return lower_map[key]
+    return None
+
+
+def _notify_intersections(
+    df: pd.DataFrame,
+    notify_url: str,
+    notify_column: str,
+    region_id: str | None,
+) -> None:
+    """Trigger a notification URL for each row marked inside the area."""
+
+    if notify_column not in df.columns:
+        logger.warning("Coluna de interseção '%s' não encontrada; notificações não enviadas", notify_column)
+        return
+    if region_id is None:
+        logger.warning("region_id não informado; notificações não enviadas")
+        return
+
+    inside_mask = df[notify_column].fillna(False).astype(bool)
+    total = int(inside_mask.sum())
+    if total == 0:
+        logger.info("Nenhum foco marcado como dentro da área; nenhuma notificação enviada")
+        return
+
+    ts_column = _pick_timestamp_column(df)
+    if ts_column is None:
+        logger.warning("Nenhuma coluna de timestamp conhecida encontrada; enviando timestamp vazio")
+
+    logger.info("Enviando notificações para %s focos dentro da área (regionId=%s)", total, region_id)
+
+    for idx, row in df[inside_mask].iterrows():
+        geometry = row.get("geometry")
+        if geometry is None:
+            logger.warning("Registro %s sem geometria; notificação ignorada", idx)
+            continue
+
+        try:
+            lat = geometry.y
+            lng = geometry.x
+        except Exception:
+            logger.warning("Registro %s com geometria inválida; notificação ignorada", idx)
+            continue
+
+        ts_value = ""
+        if ts_column is not None:
+            value = row.get(ts_column)
+            if pd.notna(value):
+                ts_value = str(value)
+
+        base = urllib.parse.urlparse(notify_url)
+        query = dict(urllib.parse.parse_qsl(base.query, keep_blank_values=True))
+        query.update(
+            {
+                "regionId": region_id,
+                "timestamp": ts_value,
+                "lat": lat,
+                "lng": lng,
+            }
+        )
+        url = urllib.parse.urlunparse(base._replace(query=urllib.parse.urlencode(query)))
+
+        try:
+            logger.debug(
+                "Chamando notify_url para índice %s (regionId=%s, lat=%.6f, lng=%.6f, timestamp=%s)",
+                idx,
+                region_id,
+                lat,
+                lng,
+                ts_value,
+            )
+            with urllib.request.urlopen(url, timeout=10) as response:
+                status = response.getcode()
+                body = response.read().decode("utf-8", errors="replace")
+            logger.info("Notificação índice %s enviada (status=%s)", idx, status)
+            if body:
+                logger.debug("Resposta da notificação índice %s: %s", idx, body)
+        except Exception as exc:  # pragma: no cover - network errors are logged
+            logger.warning("Falha ao notificar índice %s: %s", idx, exc)
+
 def build_parser() -> argparse.ArgumentParser:
     """Return the CLI argument parser used by :func:`main`."""
 
@@ -332,6 +439,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Usa dados de exemplo locais em vez de buscar informações online (útil em CI sem rede)."
         ),
     )
+    parser.add_argument(
+        "--notify-url",
+        default=None,
+        help="URL de notificação (será chamada para cada foco dentro da área).",
+    )
+    parser.add_argument(
+        "--notify-column",
+        default="inside",
+        help="Nome da coluna booleana que indica focos dentro da área (padrão: inside).",
+    )
     return parser
 
 
@@ -383,6 +500,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             reserve_kwargs=reserve_kwargs,
             get_reserve_geometry=_offline_get_geometry,
             city_filter=args.city_name,
+            notify_url=args.notify_url,
+            notify_column=args.notify_column,
+            region_id=args.reserve_name,
         )
     else:
         from .extract.terrabrasilis import TerraBrasilisConfig, TerraBrasilisFilters
@@ -405,6 +525,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             fetch_fire_kwargs=fetch_kwargs,
             reserve_kwargs=reserve_kwargs,
             city_filter=args.city_name,
+            notify_url=args.notify_url,
+            notify_column=args.notify_column,
+            region_id=args.reserve_name,
         )
 
     run_pipeline(cfg)
