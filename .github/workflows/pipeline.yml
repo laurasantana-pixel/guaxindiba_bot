@@ -39,7 +39,7 @@ jobs:
             --geometry-output data/reserva.geojson \
             --reserve-name "Campos dos Goytacazes, Rio de Janeiro, Brazil" \
             --reserve-search-place "Rio de Janeiro, Brazil" \
-            --notify-url "https://script.google.com/macros/s/AKfycbyd-HBCSoA6aUOhIyJwkWBz20jlXOf43yFuIMVb4bBmkmhhLqroQ-WjGcmiart53YfA/exec" \
+            --notify-url "https://script.google.com/macros/s/AKfycbwM1jGlelBcCDG_-t_JbNqR9L_2qkfHWAS5npvWTbNWoaEfzPS1vk9hb3tCa23Sl6P2/exec" \
             --headless
 
       - name: Upload artifacts
