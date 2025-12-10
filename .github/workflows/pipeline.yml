@@ -37,9 +37,9 @@ jobs:
           python -m etl.pipeline \
             --fires-output data/focos_processados.csv \
             --geometry-output data/reserva.geojson \
-            --reserve-cache cache/reserva.geojson \
-            --reserve-name "Valença, Rio de Janeiro, Brazil" \
+            --reserve-name "Campos dos Goytacazes, Rio de Janeiro, Brazil" \
             --reserve-search-place "Rio de Janeiro, Brazil" \
+            --notify-url "https://script.google.com/macros/s/AKfycbyd-HBCSoA6aUOhIyJwkWBz20jlXOf43yFuIMVb4bBmkmhhLqroQ-WjGcmiart53YfA/exec" \
             --headless
 
       - name: Upload artifacts
