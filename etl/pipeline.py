@@ -130,9 +130,20 @@ def run_pipeline(config: PipelineConfig | Mapping[str, Any]) -> PipelineResult:
     geometry = cfg.get_reserve_geometry(**cfg.reserve_kwargs)
     logger.info("Geometria da reserva carregada com sucesso")
 
-    if cfg.apply_transform and cfg.transformer is not None:
-        logger.info("Aplicando transformações espaciais")
-        result_df = cfg.transformer(fires, geometry, **cfg.transformer_kwargs)
+    has_geometry = "geometry" in fires.columns and fires["geometry"].notna().any()
+
+    if fires.empty:
+        logger.warning("Nenhum foco retornado; pulando transformações espaciais")
+        result_df = fires.copy()
+    elif cfg.apply_transform and cfg.transformer is not None:
+        if has_geometry:
+            logger.info("Aplicando transformações espaciais")
+            result_df = cfg.transformer(fires, geometry, **cfg.transformer_kwargs)
+        else:
+            logger.warning(
+                "Nenhuma geometria válida encontrada nos focos; pulando transformações espaciais"
+            )
+            result_df = fires.copy()
     else:
         result_df = fires.copy()
 
