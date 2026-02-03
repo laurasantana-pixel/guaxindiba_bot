@@ -322,6 +322,28 @@ def _notify_intersections(
     if ts_column is None:
         logger.warning("Nenhuma coluna de timestamp conhecida encontrada; enviando timestamp vazio")
 
+    def _format_brazil_timestamp(value: Any) -> str:
+        """Convert various timestamp values to Brazilian format dd/MM/yyyy HH:mm:ss."""
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return ""
+        try:
+            ts = pd.to_datetime(value)
+        except Exception:
+            return str(value)
+
+        if pd.isna(ts):
+            return ""
+
+        # Preserve timezone if present; otherwise keep naive as-is.
+        try:
+            if getattr(ts, "tzinfo", None) is not None:
+                ts = ts.tz_convert("America/Sao_Paulo")
+        except Exception:
+            # If tz conversion fails, fall back to original ts
+            pass
+
+        return ts.strftime("%d/%m/%Y %H:%M:%S")
+
     logger.info("Enviando notificações para %s focos dentro da área (regionId=%s)", total, region_id)
 
     for idx, row in df[inside_mask].iterrows():
@@ -341,7 +363,7 @@ def _notify_intersections(
         if ts_column is not None:
             value = row.get(ts_column)
             if pd.notna(value):
-                ts_value = str(value)
+                ts_value = _format_brazil_timestamp(value)
 
         base = urllib.parse.urlparse(notify_url)
         query = dict(urllib.parse.parse_qsl(base.query, keep_blank_values=True))
@@ -367,9 +389,16 @@ def _notify_intersections(
             with urllib.request.urlopen(url, timeout=10) as response:
                 status = response.getcode()
                 body = response.read().decode("utf-8", errors="replace")
-            logger.info("Notificação índice %s enviada (status=%s)", idx, status)
-            if body:
-                logger.debug("Resposta da notificação índice %s: %s", idx, body)
+            # Log resumo da resposta para acompanhar o retorno do Apps Script
+            preview = body[:500] if body else ""
+            logger.info(
+                "Notificação índice %s enviada (status=%s) body_preview=%s",
+                idx,
+                status,
+                preview,
+            )
+            if body and len(body) > 500:
+                logger.debug("Resposta completa da notificação índice %s: %s", idx, body)
         except Exception as exc:  # pragma: no cover - network errors are logged
             logger.warning("Falha ao notificar índice %s: %s", idx, exc)
 

@@ -2,8 +2,8 @@
  * CONFIG
  ***************/
 const CONFIG = {
-  HIST_SHEET_NAME: 'HistÇürico',
-  RESP_SHEET_NAME: 'ResponsÇ­veis',
+  HIST_SHEET_NAME: 'Histórico',
+  RESP_SHEET_NAME: 'Responsáveis',
   HIST_COL_REGION: 1,    // A
   HIST_COL_TIMESTAMP: 2, // B
   HIST_COL_LAT: 3,       // C
@@ -22,6 +22,7 @@ function doGet(e) {
   try {
     // --- 1. Validate and extract params ---
     if (!e || !e.parameter) {
+      Logger.log('doGet called without parameter object. Event: %s', JSON.stringify(e));
       return jsonResponse({ success: false, error: 'Missing parameters object' }, 400);
     }
 
@@ -30,7 +31,11 @@ function doGet(e) {
     const lat       = e.parameter.lat;
     const lng       = e.parameter.lng;
 
+    Logger.log('Incoming doGet params: regionId=%s | timestamp=%s | lat=%s | lng=%s | raw=%s',
+      regionId, ts, lat, lng, JSON.stringify(e.parameter));
+
     if (!regionId || !ts || !lat || !lng) {
+      Logger.log('Missing required params. Received: %s', JSON.stringify(e.parameter));
       return jsonResponse({
         success: false,
         error: 'Missing one or more required params: regionId, timestamp, lat, lng'
@@ -39,22 +44,26 @@ function doGet(e) {
 
     // --- 1.1. Validate timestamp format (Brazilian dd/MM/yyyy HH:mm[:ss]) ---
     if (!isBrazilianDateTime(ts)) {
+      Logger.log('Timestamp failed Brazilian format validation: %s', ts);
       return jsonResponse({
         success: false,
         error: 'timestamp must be in Brazilian format dd/MM/yyyy HH:mm[:ss]'
       }, 400);
     }
     const tsBr = toBrasilia(ts); // normalized to America/Sao_Paulo
+    Logger.log('Timestamp normalized to Brasília: %s -> %s', ts, tsBr);
 
     const ss = SpreadsheetApp.getActive();
     const histSheet = ss.getSheetByName(CONFIG.HIST_SHEET_NAME);
     const respSheet = ss.getSheetByName(CONFIG.RESP_SHEET_NAME);
 
     if (!histSheet) {
-      return jsonResponse({ success: false, error: 'HistÇürico sheet not found' }, 500);
+      Logger.log('Sheet not found: %s', CONFIG.HIST_SHEET_NAME);
+      return jsonResponse({ success: false, error: 'Histórico sheet not found' }, 500);
     }
     if (!respSheet) {
-      return jsonResponse({ success: false, error: 'ResponsÇ­veis sheet not found' }, 500);
+      Logger.log('Sheet not found: %s', CONFIG.RESP_SHEET_NAME);
+      return jsonResponse({ success: false, error: 'Responsáveis sheet not found' }, 500);
     }
 
     // --- 2. Skip duplicates (same region + timestamp + lat + lng) ---
@@ -76,6 +85,7 @@ function doGet(e) {
     });
 
     if (duplicateRowIndex !== -1) {
+      Logger.log('Duplicate detected for region=%s at row=%s', regionId, duplicateRowIndex + 1);
       return jsonResponse({
         success: true,
         duplicate: true,
@@ -85,7 +95,7 @@ function doGet(e) {
       }, 200);
     }
 
-    // --- 3. Append record to "HistÇürico" ---
+    // --- 3. Append record to "Histórico" ---
     // We can also store "serverTime" if you want: new Date()
     const newRowValues = [
       regionId,
@@ -97,8 +107,9 @@ function doGet(e) {
 
     histSheet.appendRow(newRowValues);
     const lastRow = histSheet.getLastRow();
+    Logger.log('New record appended at row %s with values: %s', lastRow, JSON.stringify(newRowValues));
 
-    // --- 4. Find responsible email for the region in "ResponsÇ­veis" ---
+    // --- 4. Find responsible email for the region in "Responsáveis" ---
     const respRange = respSheet.getDataRange();
     const respValues = respRange.getValues(); // 2D: [ [Region, Email], ... ]
 
@@ -115,8 +126,9 @@ function doGet(e) {
     }
 
     if (!responsibleEmail) {
-      // No responsible found: mark in HistÇürico and return
+      // No responsible found: mark in Histórico and return
       histSheet.getRange(lastRow, CONFIG.HIST_COL_NOTIFIED).setValue('no-responsible-found');
+      Logger.log('No responsible email found for region %s. Row %s flagged.', regionId, lastRow);
       return jsonResponse({
         success: false,
         error: 'No responsible email found for region',
@@ -125,35 +137,40 @@ function doGet(e) {
     }
 
     // --- 5. Send email to responsible ---
-    const mapsLink = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng;
-    const subject = 'Novo registro na regiÇœo ' + regionId;
+    const mapsLink = buildMapsLink(lat, lng);
+    const subject = 'Novo registro na região ' + regionId;
     const body =
-      'OlÇ­,\n\n' +
-      'Foi registrado um novo evento na regiÇœo ' + regionId + '.\n\n' +
+      'Olá,\n\n' +
+      'Foi registrado um novo evento na região ' + regionId + '.\n\n' +
       'Dados recebidos:\n' +
-      ' - Timestamp (BrasÇília): ' + tsBr + '\n' +
+      ' - Timestamp (Brasília): ' + tsBr + '\n' +
       ' - Latitude: ' + lat + '\n' +
       ' - Longitude: ' + lng + '\n' +
       ' - Google Maps: ' + mapsLink + '\n\n' +
       'Atenciosamente,\n' +
       'Sistema de Monitoramento';
 
+    Logger.log('Sending email to %s for region %s. Maps link: %s', responsibleEmail, regionId, mapsLink);
     MailApp.sendEmail(responsibleEmail, subject, body);
+    Logger.log('Email sent to %s. Marking as notified on row %s', responsibleEmail, lastRow);
 
-    // --- 6. Mark as "notified" in HistÇürico ---
+    // --- 6. Mark as "notified" in Histórico ---
     histSheet.getRange(lastRow, CONFIG.HIST_COL_NOTIFIED).setValue('notified');
 
     // --- 7. HTTP response ---
+    Logger.log('Success: region=%s | row=%s | email=%s | duplicate=false', regionId, lastRow, responsibleEmail);
     return jsonResponse({
       success: true,
       message: 'Record stored and email sent',
       regionId: regionId,
       row: lastRow,
-      responsibleEmail: responsibleEmail
+      responsibleEmail: responsibleEmail,
+      mapsLink: mapsLink
     }, 200);
 
   } catch (err) {
     // Basic error handling + JSON response
+    Logger.log('Unhandled error in doGet: %s', err && err.stack ? err.stack : String(err));
     return jsonResponse({
       success: false,
       error: err && err.message ? err.message : String(err)
@@ -169,7 +186,7 @@ function jsonResponse(obj, statusCode) {
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 
-  // Apps Script Web Apps donƒ?Tt support status codes directly,
+  // Apps Script Web Apps don't support status codes directly,
   // but we include it in the JSON anyway.
   // If you use an Add-on or API Executable, you can adapt this.
   return output;
@@ -220,4 +237,11 @@ function toBrasilia(value) {
 
   const d = new Date(year, month, day, hour, minute, second);
   return Utilities.formatDate(d, 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm:ss');
+}
+
+/**
+ * Build Google Maps link for given coordinates.
+ */
+function buildMapsLink(lat, lng) {
+  return 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng;
 }
